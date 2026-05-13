@@ -1,0 +1,6 @@
+apiVersion: v2
+name: tts-trainer
+description: StyleTTS2 fine-tune trainer with Kokoro voicepack export (fork by autoeditor-video-or-audio).
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

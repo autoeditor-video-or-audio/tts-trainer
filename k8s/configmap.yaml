@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tts-trainer-config
+  labels:
+    app: tts-trainer
+data:
+  TTS_TRAINER_MODEL: "k2-fsa/tts-trainer"
+  TTS_TRAINER_DTYPE: "float16"
+  TTS_TRAINER_DEVICE: "cuda:0"
+  TTS_TRAINER_NUM_STEP: "32"
+  TTS_TRAINER_CLONE_MIN_SECONDS: "3"
+  TTS_TRAINER_CLONE_STORE_MAX_SECONDS: "15"
+  TTS_TRAINER_LOG_LEVEL: "INFO"
+  HF_HUB_ENABLE_HF_TRANSFER: "1"

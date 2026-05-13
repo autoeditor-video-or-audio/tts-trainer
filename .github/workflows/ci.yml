@@ -1,0 +1,216 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  packages: write
+
+jobs:
+  release:
+    name: Semantic Release
+    runs-on: ubuntu-latest
+    outputs:
+      new_release: ${{ steps.check_release.outputs.new_release }}
+      version: ${{ steps.check_release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get previous tag
+        id: prev_tag
+        run: |
+          PREV=$(git tag --list 'v*' --sort=-v:refname | head -n 1)
+          echo "prev_tag=${PREV:-none}" >> $GITHUB_OUTPUT
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Semantic Release
+        uses: cycjimmy/semantic-release-action@v4
+        with:
+          extra_plugins: |
+            @semantic-release/changelog
+            @semantic-release/git
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check if new release was created
+        id: check_release
+        run: |
+          git fetch --tags --force 2>/dev/null || true
+          CURRENT=$(git tag --list 'v*' --sort=-v:refname | head -n 1)
+          PREV="${{ steps.prev_tag.outputs.prev_tag }}"
+          if [ "$CURRENT" != "$PREV" ] && [ -n "$CURRENT" ]; then
+            echo "new_release=true" >> $GITHUB_OUTPUT
+            echo "version=$CURRENT" >> $GITHUB_OUTPUT
+          else
+            echo "new_release=false" >> $GITHUB_OUTPUT
+            echo "version=$CURRENT" >> $GITHUB_OUTPUT
+          fi
+
+  publish_gpu:
+    name: Publish Docker (gpu)
+    needs: [release]
+    if: needs.release.outputs.new_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Free runner disk
+        uses: jlumbroso/free-disk-space@v1.3.1
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: false
+
+      - name: Set version
+        run: echo "VERSION=${{ needs.release.outputs.version }}" >> $GITHUB_ENV
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push (gpu)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.gpu
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/tts-trainer:${{ env.VERSION }}-gpu
+            ghcr.io/${{ github.repository_owner }}/tts-trainer:latest-gpu
+          cache-from: type=gha,scope=gpu
+          cache-to: type=gha,mode=max,scope=gpu
+
+  publish_gpu_flash:
+    name: Publish Docker (gpu+flash-attn)
+    needs: [release]
+    if: needs.release.outputs.new_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Free runner disk
+        uses: jlumbroso/free-disk-space@v1.3.1
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: false
+
+      - name: Set version
+        run: echo "VERSION=${{ needs.release.outputs.version }}" >> $GITHUB_ENV
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push (gpu+flash-attn)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.gpu
+          push: true
+          platforms: linux/amd64
+          build-args: |
+            INSTALL_FLASH_ATTN=1
+            CUDA_BASE_TAG=12.8.1-devel-ubuntu22.04
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/tts-trainer:${{ env.VERSION }}-gpu-flash
+            ghcr.io/${{ github.repository_owner }}/tts-trainer:latest-gpu-flash
+          cache-from: type=gha,scope=gpu-flash
+          cache-to: type=gha,mode=max,scope=gpu-flash
+
+  deploy:
+    name: Deploy
+    needs: [publish_gpu, publish_gpu_flash, release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Pull latest
+        run: git pull --rebase origin main
+
+      - name: Update helm
+        run: |
+          VERSION="${{ needs.release.outputs.version }}"
+          REPO="ghcr.io/${{ github.repository_owner }}/tts-trainer"
+          TAG="${VERSION}-gpu"
+          if [ -f helm/values.yaml ]; then
+            sed -i \
+              -e "s|^\([[:space:]]*repository:\)[[:space:]].*|\1 ${REPO}|" \
+              -e "s|^\([[:space:]]*tag:\)[[:space:]].*|\1 ${TAG}|" \
+              helm/values.yaml
+          fi
+          if [ -f helm/Chart.yaml ]; then
+            sed -i \
+              -e "s|^version: .*|version: ${VERSION#v}|" \
+              -e "s|^appVersion: .*|appVersion: \"${VERSION#v}\"|" \
+              helm/Chart.yaml
+          fi
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add helm/values.yaml helm/Chart.yaml 2>/dev/null || true
+          if ! git diff --staged --quiet 2>/dev/null; then
+            git commit -m "chore: update helm to ${{ needs.release.outputs.version }} [skip ci]"
+            git push origin main
+          fi
+
+  cleanup_ghcr:
+    name: Cleanup old GHCR versions
+    needs: [publish_gpu, publish_gpu_flash, release]
+    if: always() && needs.release.outputs.new_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - name: Delete old tts-trainer versions (keep 10)
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: tts-trainer
+          package-type: container
+          owner: ${{ github.repository_owner }}
+          min-versions-to-keep: 10
+          ignore-versions: '^latest-gpu(-flash)?$'

@@ -1,0 +1,61 @@
+# tts-trainer — production GHCR image, single-stack StyleTTS2 trainer.
+# Runs on host port 8009 (chosen so it coexists with omnivoice-tts on
+# 8005 and the existing kokoro-fastapi on 8880).
+#
+# Usage on the GPU host:
+#   cp .env.example .env       # fill MinIO creds
+#   docker compose --env-file .env -f docker-compose.gpu.prod.yml pull
+#   docker compose --env-file .env -f docker-compose.gpu.prod.yml up -d
+#   docker logs -f tts-trainer-server
+#
+# Endpoints (see openspec/changes/add-tts-trainer-server/specs/...):
+#   GET  /health
+#   POST /v1/datasets/download
+#   GET  /v1/datasets
+#   POST /v1/training/runs
+#   GET  /v1/training/runs[/{id}]
+#   DELETE /v1/training/runs/{id}
+#   POST /v1/voicepacks/{run_id}/export
+#   GET  /v1/voicepacks
+#   GET  /v1/voicepacks/{name}/download
+
+services:
+  tts-trainer-server:
+    container_name: tts-trainer-server
+    image: ghcr.io/autoeditor-video-or-audio/tts-trainer:${TTS_TRAINER_IMAGE_TAG:-latest-gpu-flash}
+    ports:
+      - "${TTS_TRAINER_PORT:-8009}:8009"
+    environment:
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT:-192.168.15.152:30002}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY is required}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:?MINIO_SECRET_KEY is required}
+      - MINIO_BUCKET=${MINIO_BUCKET:-tts-training}
+      - MINIO_SECURE=${MINIO_SECURE:-false}
+      - TTS_TRAINER_LOG_LEVEL=${TTS_TRAINER_LOG_LEVEL:-INFO}
+      - HF_HUB_ENABLE_HF_TRANSFER=1
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    volumes:
+      - ./data/datasets:/app/data/datasets
+      - ./data/runs:/app/data/runs
+      - ./data/voicepacks:/app/data/voicepacks
+      - ./data/kokoro-voices:/app/data/kokoro-voices  # optionally shared with kokoro-fastapi
+      - cache-hf:/root/.cache/huggingface
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8009/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 120s
+      retries: 3
+
+volumes:
+  cache-hf:

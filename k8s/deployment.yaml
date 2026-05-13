@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tts-trainer
+  labels:
+    app: tts-trainer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tts-trainer
+  template:
+    metadata:
+      labels:
+        app: tts-trainer
+    spec:
+      containers:
+        - name: tts-trainer-server
+          image: ghcr.io/autoeditor-video-or-audio/tts-trainer:latest-gpu-flash
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8009
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: tts-trainer-config
+          volumeMounts:
+            - name: references
+              mountPath: /app/reference_audio
+            - name: hf-cache
+              mountPath: /root/.cache/huggingface
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 240
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 10
+          resources:
+            limits:
+              cpu: "4"
+              memory: 12Gi
+              nvidia.com/gpu: 1
+            requests:
+              cpu: "1"
+              memory: 4Gi
+              nvidia.com/gpu: 1
+      volumes:
+        - name: references
+          persistentVolumeClaim:
+            claimName: tts-trainer-references
+        - name: hf-cache
+          persistentVolumeClaim:
+            claimName: tts-trainer-hf-cache

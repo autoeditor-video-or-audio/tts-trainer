@@ -1,0 +1,95 @@
+# GPU image for the tts-trainer FastAPI service (StyleTTS2 → Kokoro voicepack).
+#
+# Mirrors the sibling fork pattern (omnivoice-tts / qwen3-tts):
+# nvidia/cuda base + deadsnakes Python 3.12 + libcudnn8 + ffmpeg.
+# Installs the upstream StyleTTS2 requirements + MFA + our server addons.
+#
+# Build:  docker build -f Dockerfile.gpu -t tts-trainer:gpu .
+# Run:    docker run --gpus all -p 8009:8009 tts-trainer:gpu
+# Compose: docker-compose.gpu.prod.yml
+
+ARG CUDA_BASE_TAG=12.8.1-base-ubuntu22.04
+FROM nvidia/cuda:${CUDA_BASE_TAG}
+
+LABEL org.opencontainers.image.source="https://github.com/autoeditor-video-or-audio/tts-trainer"
+
+ARG INSTALL_FLASH_ATTN=0
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+RUN apt-get -qq update \
+    && apt-get -qq install --no-install-recommends \
+        software-properties-common \
+        ca-certificates \
+        curl \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get -qq update \
+    && apt-get -qq install --no-install-recommends \
+        python3.12 \
+        python3.12-venv \
+        python3.12-dev \
+        build-essential \
+        cmake \
+        ffmpeg \
+        git \
+        libcudnn8 \
+        libsndfile1 \
+        sox \
+        wget \
+        espeak-ng \
+    && curl -sS https://bootstrap.pypa.io/get-pip.py | python3.12 \
+    && ln -sf /usr/bin/python3.12 /usr/local/bin/python \
+    && ln -sf /usr/bin/python3.12 /usr/local/bin/python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Torch 2.8 + cu128 first.
+RUN pip install --upgrade pip \
+    && pip install --extra-index-url https://download.pytorch.org/whl/cu128 \
+        "torch==2.8.0" "torchaudio==2.8.0"
+
+# Server-side runtime + StyleTTS2 + MFA deps.
+RUN pip install \
+        "fastapi>=0.110" "uvicorn[standard]>=0.29" "python-multipart>=0.0.9" \
+        "pydantic>=2.7" \
+        "soundfile" "librosa" "numpy>=1.24" "pyworld" \
+        "phonemizer" "monotonic-align" "einops" \
+        "transformers" "accelerate" "PyYAML" \
+        "datasets>=2.20" "huggingface_hub" "hf_transfer>=0.1.6" \
+        "minio>=7.2" \
+        "montreal-forced-aligner>=3.0"
+
+COPY . .
+
+# Optional flash-attn (prebuilt wheel match for torch 2.8 / cu12 / cp312).
+ARG FLASH_ATTN_WHEEL=https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp312-cp312-linux_x86_64.whl
+RUN if [ "$INSTALL_FLASH_ATTN" = "1" ]; then \
+        pip install --no-cache-dir "${FLASH_ATTN_WHEEL}" \
+            || pip install --no-cache-dir "flash-attn==2.8.3" --no-build-isolation; \
+    fi
+
+ENV TTS_TRAINER_DATA_DIR=/app/data \
+    TTS_TRAINER_UPSTREAM_SCRIPT=/app/train_finetune.py \
+    KOKORO_VOICES_DIR=/app/data/kokoro-voices \
+    MINIO_BUCKET=tts-training \
+    MINIO_SECURE=false \
+    HF_HOME=/root/.cache/huggingface \
+    HF_HUB_ENABLE_HF_TRANSFER=1 \
+    PYTHONPATH=/app
+
+RUN mkdir -p ${TTS_TRAINER_DATA_DIR}/datasets \
+             ${TTS_TRAINER_DATA_DIR}/runs \
+             ${TTS_TRAINER_DATA_DIR}/voicepacks \
+             ${KOKORO_VOICES_DIR}
+
+EXPOSE 8009
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:8009/health || exit 1
+
+CMD ["python3", "-m", "uvicorn", "server_addons.server_app:app", "--host", "0.0.0.0", "--port", "8009", "--workers", "1"]

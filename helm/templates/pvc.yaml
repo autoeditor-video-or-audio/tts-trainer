@@ -1,0 +1,35 @@
+{{- if .Values.persistence.references.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-references
+  labels:
+    app: {{ .Release.Name }}
+spec:
+  accessModes:
+    - {{ .Values.persistence.references.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.references.size }}
+  {{- if .Values.persistence.references.storageClass }}
+  storageClassName: {{ .Values.persistence.references.storageClass }}
+  {{- end }}
+---
+{{- end }}
+{{- if .Values.persistence.hf.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-hf-cache
+  labels:
+    app: {{ .Release.Name }}
+spec:
+  accessModes:
+    - {{ .Values.persistence.hf.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.hf.size }}
+  {{- if .Values.persistence.hf.storageClass }}
+  storageClassName: {{ .Values.persistence.hf.storageClass }}
+  {{- end }}
+{{- end }}
