@@ -1,3 +1,10 @@
+## [1.1.1](https://github.com/autoeditor-video-or-audio/tts-trainer/compare/v1.1.0...v1.1.1) (2026-05-14)
+
+
+### Bug Fixes
+
+* **datasets:** install torchcodec + drop fleurs adapter (script-based, banned) ([b872bbf](https://github.com/autoeditor-video-or-audio/tts-trainer/commit/b872bbf87a4d2a39050a89409781e370453643b8))
+
 # [1.1.0](https://github.com/autoeditor-video-or-audio/tts-trainer/compare/v1.0.1...v1.1.0) (2026-05-14)
 
 
