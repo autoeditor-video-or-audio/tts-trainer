@@ -78,51 +78,38 @@ def list_local() -> list[DatasetInfo]:
     return list(seen.values())
 
 
-def download_common_voice_ptbr(dataset_id: str = "commonvoice_ptbr") -> DatasetInfo:
-    """Download Common Voice PT-BR via HuggingFace Datasets streaming.
+def _stream_and_pack(
+    dataset_id: str,
+    *,
+    iterable_rows,
+    audio_field: str = "audio",
+    text_field: str = "sentence",
+    speaker_field: str = "client_id",
+    label: str,
+) -> DatasetInfo:
+    """Shared download / resample / pack / push pipeline.
 
-    Writes a single packed tarball + manifest to MinIO. Idempotent:
-    if `ready.json` is already present, returns immediately.
+    `iterable_rows` is an iterable of dict-like records from
+    `datasets.load_dataset(..., streaming=True)`.
     """
-    storage = get_storage()
-    if storage.exists(_key(dataset_id, "ready.json")):
-        logger.info("dataset %s already present in MinIO; skipping", dataset_id)
-        return DatasetInfo(
-            id=dataset_id,
-            hours=None,
-            speakers=None,
-            downloaded_at=datetime.now(timezone.utc).isoformat(),
-            status="ready",
-        )
-
-    # Lazy import — datasets has heavy deps; only pay the cost on demand.
-    from datasets import load_dataset
     import soundfile as sf
     import numpy as np
 
+    storage = get_storage()
     local_root = _local_root(dataset_id)
     wavs_dir = local_root / "wavs"
     wavs_dir.mkdir(parents=True, exist_ok=True)
     metadata_path = local_root / "metadata.csv"
-
-    logger.info("downloading mozilla-foundation/common_voice_19_0 pt (streaming) → %s", local_root)
-    ds = load_dataset(
-        "mozilla-foundation/common_voice_19_0",
-        "pt",
-        split="train",
-        streaming=True,
-        trust_remote_code=False,
-    )
 
     n_rows = 0
     total_seconds = 0.0
     speakers: set[str] = set()
     with metadata_path.open("w", encoding="utf-8", newline="") as fh:
         writer = csv.writer(fh, delimiter="|")
-        for row in ds:
-            audio = row.get("audio")
-            sentence = (row.get("sentence") or "").strip()
-            speaker = row.get("client_id") or "unknown"
+        for row in iterable_rows:
+            audio = row.get(audio_field)
+            sentence = (row.get(text_field) or "").strip()
+            speaker = str(row.get(speaker_field) or "unknown")
             if not audio or not sentence:
                 continue
             arr = np.asarray(audio["array"], dtype=np.float32)
@@ -141,16 +128,17 @@ def download_common_voice_ptbr(dataset_id: str = "commonvoice_ptbr") -> DatasetI
             writer.writerow([f"wavs/{file_stem}.wav", sentence, speaker])
             if n_rows % 500 == 0:
                 logger.info(
-                    "  %d rows (%.1f h, %d speakers)",
+                    "[%s] %d rows (%.1f h, %d speakers)",
+                    label,
                     n_rows,
                     total_seconds / 3600.0,
                     len(speakers),
                 )
 
     hours = total_seconds / 3600.0
-    logger.info("packing %s (%.2f h, %d speakers)", dataset_id, hours, len(speakers))
+    logger.info("[%s] packing (%.2f h, %d speakers)", label, hours, len(speakers))
 
-    # Pack to a single tarball + small ready.json with stats, push to MinIO.
+    # Tarball + push to MinIO.
     with tempfile.NamedTemporaryFile(suffix=".tar", delete=False) as tmp_tar:
         tmp_tar_path = Path(tmp_tar.name)
     try:
@@ -186,9 +174,114 @@ def download_common_voice_ptbr(dataset_id: str = "commonvoice_ptbr") -> DatasetI
     )
 
 
+def _already_ready(dataset_id: str) -> Optional[DatasetInfo]:
+    storage = get_storage()
+    if storage.exists(_key(dataset_id, "ready.json")):
+        logger.info("dataset %s already present in MinIO; skipping", dataset_id)
+        return DatasetInfo(
+            id=dataset_id,
+            hours=None,
+            speakers=None,
+            downloaded_at=datetime.now(timezone.utc).isoformat(),
+            status="ready",
+        )
+    return None
+
+
+def download_common_voice_ptbr(dataset_id: str = "commonvoice_ptbr") -> DatasetInfo:
+    """Common Voice PT-BR via HF (gated dataset — requires HF_TOKEN env)."""
+    cached = _already_ready(dataset_id)
+    if cached:
+        return cached
+    from datasets import load_dataset
+    logger.info("downloading mozilla-foundation/common_voice_19_0 pt (streaming)")
+    token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+    if not token:
+        raise RuntimeError(
+            "Common Voice is gated on HuggingFace. Visit "
+            "https://huggingface.co/datasets/mozilla-foundation/common_voice_19_0 "
+            "to accept the terms, then set HF_TOKEN in the trainer .env."
+        )
+    ds = load_dataset(
+        "mozilla-foundation/common_voice_19_0",
+        "pt",
+        split="train",
+        streaming=True,
+        trust_remote_code=False,
+        token=token,
+    )
+    return _stream_and_pack(
+        dataset_id,
+        iterable_rows=ds,
+        audio_field="audio",
+        text_field="sentence",
+        speaker_field="client_id",
+        label="commonvoice_ptbr",
+    )
+
+
+def download_mls_ptbr(dataset_id: str = "mls_ptbr") -> DatasetInfo:
+    """Multilingual LibriSpeech Portuguese — public, ~160h.
+
+    HF mirror: facebook/multilingual_librispeech config 'portuguese'.
+    """
+    cached = _already_ready(dataset_id)
+    if cached:
+        return cached
+    from datasets import load_dataset
+    logger.info("downloading facebook/multilingual_librispeech portuguese (streaming)")
+    ds = load_dataset(
+        "facebook/multilingual_librispeech",
+        "portuguese",
+        split="train",
+        streaming=True,
+        trust_remote_code=False,
+    )
+    return _stream_and_pack(
+        dataset_id,
+        iterable_rows=ds,
+        audio_field="audio",
+        text_field="transcript",
+        speaker_field="speaker_id",
+        label="mls_ptbr",
+    )
+
+
+def download_fleurs_ptbr(dataset_id: str = "fleurs_ptbr") -> DatasetInfo:
+    """Google FLEURS pt_br — public, ~10h, small test/dev split.
+
+    Good for smoke testing the full training loop before committing to
+    a 100+h corpus.
+    """
+    cached = _already_ready(dataset_id)
+    if cached:
+        return cached
+    from datasets import load_dataset
+    logger.info("downloading google/fleurs pt_br (streaming)")
+    ds = load_dataset(
+        "google/fleurs",
+        "pt_br",
+        split="train",
+        streaming=True,
+        trust_remote_code=False,
+    )
+    return _stream_and_pack(
+        dataset_id,
+        iterable_rows=ds,
+        audio_field="audio",
+        text_field="transcription",
+        speaker_field="id",
+        label="fleurs_ptbr",
+    )
+
+
 def download_dataset(dataset_id: str) -> DatasetInfo:
     if dataset_id == "commonvoice_ptbr":
         return download_common_voice_ptbr(dataset_id)
+    if dataset_id == "mls_ptbr":
+        return download_mls_ptbr(dataset_id)
+    if dataset_id == "fleurs_ptbr":
+        return download_fleurs_ptbr(dataset_id)
     if dataset_id in {"cetuc", "coraa"}:
         raise NotImplementedError(
             f"adapter for {dataset_id!r} is not implemented yet — file an issue or contribute one"

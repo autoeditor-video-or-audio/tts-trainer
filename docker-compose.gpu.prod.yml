@@ -33,6 +33,7 @@ services:
       - MINIO_SECURE=${MINIO_SECURE:-false}
       - TTS_TRAINER_LOG_LEVEL=${TTS_TRAINER_LOG_LEVEL:-INFO}
       - HF_HUB_ENABLE_HF_TRANSFER=1
+      - HF_TOKEN=${HF_TOKEN:-}
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     volumes:
