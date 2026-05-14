@@ -247,42 +247,16 @@ def download_mls_ptbr(dataset_id: str = "mls_ptbr") -> DatasetInfo:
     )
 
 
-def download_fleurs_ptbr(dataset_id: str = "fleurs_ptbr") -> DatasetInfo:
-    """Google FLEURS pt_br — public, ~10h, small test/dev split.
-
-    Good for smoke testing the full training loop before committing to
-    a 100+h corpus.
-    """
-    cached = _already_ready(dataset_id)
-    if cached:
-        return cached
-    from datasets import load_dataset
-    logger.info("downloading google/fleurs pt_br (streaming)")
-    ds = load_dataset(
-        "google/fleurs",
-        "pt_br",
-        split="train",
-        streaming=True,
-        trust_remote_code=False,
-    )
-    return _stream_and_pack(
-        dataset_id,
-        iterable_rows=ds,
-        audio_field="audio",
-        text_field="transcription",
-        speaker_field="id",
-        label="fleurs_ptbr",
-    )
-
-
 def download_dataset(dataset_id: str) -> DatasetInfo:
     if dataset_id == "commonvoice_ptbr":
         return download_common_voice_ptbr(dataset_id)
     if dataset_id == "mls_ptbr":
         return download_mls_ptbr(dataset_id)
-    if dataset_id == "fleurs_ptbr":
-        return download_fleurs_ptbr(dataset_id)
-    if dataset_id in {"cetuc", "coraa"}:
+    if dataset_id in {"cetuc", "coraa", "fleurs_ptbr"}:
+        # FLEURS removed: datasets>=2.20 banned legacy loading scripts
+        # (google/fleurs still ships a fleurs.py loader). Bring it back
+        # via a parquet-based adapter if needed; for now MLS covers the
+        # smoke + full-scale paths.
         raise NotImplementedError(
             f"adapter for {dataset_id!r} is not implemented yet — file an issue or contribute one"
         )
