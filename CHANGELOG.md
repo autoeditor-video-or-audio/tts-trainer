@@ -1,3 +1,10 @@
+## [1.0.1](https://github.com/autoeditor-video-or-audio/tts-trainer/compare/v1.0.0...v1.0.1) (2026-05-14)
+
+
+### Bug Fixes
+
+* **deps:** swap unmaintained monotonic-align PyPI pkg + drop MFA from pip ([20fb95e](https://github.com/autoeditor-video-or-audio/tts-trainer/commit/20fb95ef506ceb96e6173b566cd89b1528ee9ab6))
+
 # 1.0.0 (2026-05-13)
 
 
