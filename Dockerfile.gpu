@@ -53,16 +53,24 @@ RUN pip install --upgrade pip \
     && pip install --extra-index-url https://download.pytorch.org/whl/cu128 \
         "torch==2.8.0" "torchaudio==2.8.0"
 
-# Server-side runtime + StyleTTS2 + MFA deps.
+# Server-side runtime + StyleTTS2 deps.
+# Notes:
+# - 'monotonic-align' on PyPI is unmaintained (pre-Python 3.12 Cython,
+#   accesses removed PyLongObject.ob_digit). Upstream StyleTTS2's
+#   requirements.txt pins the resemble-ai fork; we follow that.
+# - 'montreal-forced-aligner' (MFA) ships its own conda recipe and pulls
+#   heavy native deps. Drop it from this image; the trainer wraps
+#   StyleTTS2's pre-aligned pipeline and operators that need MFA can run
+#   it once on the dataset outside the container before queueing a run.
 RUN pip install \
         "fastapi>=0.110" "uvicorn[standard]>=0.29" "python-multipart>=0.0.9" \
         "pydantic>=2.7" \
         "soundfile" "librosa" "numpy>=1.24" "pyworld" \
-        "phonemizer" "monotonic-align" "einops" \
+        "phonemizer" "einops" "einops-exts" "munch" "nltk" "tqdm" \
         "transformers" "accelerate" "PyYAML" \
         "datasets>=2.20" "huggingface_hub" "hf_transfer>=0.1.6" \
         "minio>=7.2" \
-        "montreal-forced-aligner>=3.0"
+        "git+https://github.com/resemble-ai/monotonic_align.git"
 
 COPY . .
 
