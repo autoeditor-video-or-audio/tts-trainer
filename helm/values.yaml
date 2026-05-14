@@ -2,7 +2,7 @@ replicaCount: 1
 
 image:
   repository: ghcr.io/autoeditor-video-or-audio/tts-trainer
-  tag: v1.0.1-gpu
+  tag: v1.1.0-gpu
   pullPolicy: IfNotPresent
 
 service:
