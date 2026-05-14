@@ -1,3 +1,10 @@
+# [1.1.0](https://github.com/autoeditor-video-or-audio/tts-trainer/compare/v1.0.1...v1.1.0) (2026-05-14)
+
+
+### Features
+
+* **datasets:** add public MLS + FLEURS PT-BR adapters; gate Common Voice on HF_TOKEN ([4417249](https://github.com/autoeditor-video-or-audio/tts-trainer/commit/44172498c5a95a88835e826d36fb8e7ba17ad536))
+
 ## [1.0.1](https://github.com/autoeditor-video-or-audio/tts-trainer/compare/v1.0.0...v1.0.1) (2026-05-14)
 
 
